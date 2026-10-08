@@ -231,7 +231,7 @@ fun transferMoney(fromPlayerId: Int, toPlayerId: Int?, amount: Int): Boolean {
         }
     }
     
-    _players.value = updatedPlayers
+    _players.value = updatedPlayers !!
     return true
 }
 ```
