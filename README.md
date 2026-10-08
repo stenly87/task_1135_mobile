@@ -502,7 +502,7 @@ private fun setupStartGameListener() {
 
 Замените содержимое метода onCreateView вызовом созданных методов
 ```kotlin
-	val view = inflater.inflate(R.layout.fragment_game, container, false)
+	val view = inflater.inflate(R.layout.fragment_setup, container, false)
 	initializeViews(view)
 	setupObservers()
 	setupAddPlayerListener()
