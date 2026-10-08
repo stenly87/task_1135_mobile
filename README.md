@@ -202,7 +202,7 @@ fun addMoney(amount: Int) {
         }
     }
     
-    _players.value = updatedPlayers
+    _players.value = updatedPlayers !!
 }
 ```
 
