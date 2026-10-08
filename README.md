@@ -504,10 +504,9 @@ private fun setupStartGameListener() {
 ```kotlin
 	val view = inflater.inflate(R.layout.fragment_game, container, false)
 	initializeViews(view)
-	initializeGame()
-	setupSpinnerListeners()
 	setupObservers()
-	setupButtonListeners()
+	setupAddPlayerListener()
+	setupStartGameListener()
 
 	return view
 ```
