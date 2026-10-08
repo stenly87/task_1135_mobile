@@ -26,7 +26,9 @@ alias(libs.plugins.kotlin.parcelize)
 ```
 
 Откройте файл `libs.versions.toml` и добавьте следующую строку в секцию `plugins`:
-kotlin-parcelize = { id = "org.jetbrains.kotlin.plugin.parcelize", version.ref = "2.4.20" }
+kotlin-parcelize = { id = "org.jetbrains.kotlin.plugin.parcelize", version.ref = "kotlin" }
+и следующую строку  в секцию `versions`
+kotlin = "2.4.20"
 
 
 Синхронизируйте проект, нажав **"Sync Now"**.
