@@ -1,0 +1,653 @@
+# Руководство: Приложение "Заявки на ремонт оргтехники"
+
+В этом руководстве мы создадим приложение для управления заявками на заправку картриджей и ремонт принтеров/сканеров. Приложение будет получать список заявок с сервера, позволять добавлять новые заявки и отмечать выполненные.
+
+Приложение будет состоять из одного Activity с одним фрагментом, который отображает список заявок и форму для создания новой.
+
+## Шаг 0: Создание нового проекта
+
+1. Откройте Android Studio
+2. Нажмите "New Project"
+3. Выберите шаблон **"Empty Views Activity"**
+4. Настройте проект:
+   - **Name:** OfficeTechApp
+   - **Package name:** com.example.officetech
+   - **Language:** Kotlin
+   - **Minimum SDK:** API 24 (Android 7.0) или выше
+5. Нажмите "Finish"
+
+## Шаг 1: Добавление зависимостей
+
+Откройте файл `build.gradle.kts` (уровня модуля app) и добавьте следующие зависимости в секцию `dependencies`:
+
+```kotlin
+// Retrofit для работы с REST API
+implementation(libs.retrofit)
+implementation(libs.retrofit.converter.gson)
+
+// Coroutines для асинхронных запросов
+implementation(libs.kotlinx.coroutines.android)
+
+// ViewModel и Lifecycle
+implementation(libs.androidx.lifecycle.viewmodel.ktx)
+implementation(libs.androidx.lifecycle.runtime.ktx)
+
+// RecyclerView для списка заявок
+implementation("androidx.recyclerview:recyclerview:1.3.2")
+```
+
+В файле `libs.versions.toml` в секцию `[versions]` добавьте:
+```toml
+retrofit = "2.11.0"
+coroutines = "1.11.0"
+lifecycle = "2.11.0"
+```
+
+А в секцию `[libraries]` добавьте:
+```toml
+retrofit = { group = "com.squareup.retrofit2", name = "retrofit", version.ref = "retrofit" }
+retrofit-converter-gson = { group = "com.squareup.retrofit2", name = "converter-gson", version.ref = "retrofit" }
+kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
+androidx-lifecycle-viewmodel-ktx = { group = "androidx.lifecycle", name = "lifecycle-viewmodel-ktx", version.ref = "lifecycle" }
+androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycle" }
+```
+
+Синхронизируйте проект, нажав **"Sync Now"**.
+
+## Шаг 2: Создание моделей данных
+
+Создайте новый файл `ServiceRequest.kt` в папке `app/src/main/java/com/example/officetech`:
+
+```kotlin
+package com.example.officetech
+
+import com.google.gson.annotations.SerializedName
+
+data class ServiceRequest(
+    val id: Int,
+    val deviceType: String,      // Тип устройства: Принтер, Сканер, Ксерокс
+    val deviceModel: String,     // Модель устройства
+    val problemDescription: String, // Описание проблемы
+    val location: String,        // Место расположения (кабинет/этаж)
+    val status: String,          // Статус: "new", "in_progress", "completed"
+    @SerializedName("created_at")
+    val createdAt: String        // Дата создания
+)
+```
+
+Создайте файл `NewRequestDto.kt` для отправки новой заявки:
+
+```kotlin
+package com.example.officetech
+
+data class NewRequestDto(
+    val deviceType: String,
+    val deviceModel: String,
+    val problemDescription: String,
+    val location: String
+)
+```
+
+## Шаг 3: Создание API сервиса и Retrofit клиента
+
+**Схема API:**
+- `GET /api/requests` — получить все заявки
+- `POST /api/requests` — создать новую заявку
+- `PUT /api/requests/{id}/complete` — пометить заявку выполненной
+
+Создайте файл `ApiService.kt`:
+
+```kotlin
+package com.example.officetech
+
+import retrofit2.http.*
+
+interface ApiService {
+    @GET("api/requests")
+    suspend fun getRequests(): List<ServiceRequest>
+    
+    @POST("api/requests")
+    suspend fun createRequest(@Body request: NewRequestDto): ServiceRequest
+    
+    @PUT("api/requests/{id}/complete")
+    suspend fun completeRequest(@Path("id") requestId: Int): ServiceRequest
+}
+```
+
+Создайте файл `RetrofitClient.kt`:
+
+```kotlin
+package com.example.officetech
+
+import retrofit2.Retrofit
+import retrofit2.converter.gson.GsonConverterFactory
+
+object RetrofitClient {
+    // ВАЖНО: Базовый URL должен заканчиваться на /
+    // Тут пишем внешний ip-адрес компьютера с сервером
+    private const val BASE_URL = "http://192.168.4.1:5000/"
+    
+    private val retrofit: Retrofit by lazy {
+        Retrofit.Builder()
+            .baseUrl(BASE_URL)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+    }
+    
+    val apiService: ApiService by lazy {
+        retrofit.create(ApiService::class.java)
+    }
+}
+```
+
+## Шаг 4: Создание Repository
+
+Создайте файл `RequestRepository.kt`:
+
+```kotlin
+package com.example.officetech
+
+class RequestRepository {
+    private val apiService = RetrofitClient.apiService
+    
+    suspend fun getRequests(): Result<List<ServiceRequest>> {
+        return try {
+            val requests = apiService.getRequests()
+            Result.success(requests)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    suspend fun createRequest(
+        deviceType: String,
+        deviceModel: String,
+        description: String,
+        location: String
+    ): Result<ServiceRequest> {
+        return try {
+            val newRequest = NewRequestDto(deviceType, deviceModel, description, location)
+            val created = apiService.createRequest(newRequest)
+            Result.success(created)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    suspend fun completeRequest(requestId: Int): Result<ServiceRequest> {
+        return try {
+            val updated = apiService.completeRequest(requestId)
+            Result.success(updated)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+}
+```
+
+## Шаг 5: Изменение ViewModel
+
+Создайте файл `UiState.kt` для состояний интерфейса:
+
+```kotlin
+package com.example.officetech
+
+sealed class UiState {
+    object Idle : UiState()
+    object Loading : UiState()
+    data class Success(val requests: List<ServiceRequest>) : UiState()
+    data class Error(val message: String) : UiState()
+}
+```
+
+Создайте фрагмент с вьюмоделью `RequestListFragment`, внесите изменения в его вьюмодель:
+
+```kotlin
+package com.example.officetech
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
+
+class RequestListViewModel : ViewModel() {
+    
+    private val repository = RequestRepository()
+    
+    private val _uiState = MutableStateFlow<UiState>(UiState.Idle)
+    val uiState: StateFlow<UiState> = _uiState
+    
+    fun loadRequests() {
+        viewModelScope.launch {
+            _uiState.value = UiState.Loading
+            
+            repository.getRequests()
+                .onSuccess { requests ->
+                    _uiState.value = UiState.Success(requests)
+                }
+                .onFailure { exception ->
+                    _uiState.value = UiState.Error(
+                        exception.message ?: "Ошибка загрузки заявок"
+                    )
+                }
+        }
+    }
+    
+    fun createRequest(
+        deviceType: String,
+        deviceModel: String,
+        description: String,
+        location: String
+    ) {
+        if (deviceType.isBlank() || deviceModel.isBlank() || 
+            description.isBlank() || location.isBlank()) {
+            _uiState.value = UiState.Error("Заполните все поля")
+            return
+        }
+        
+        viewModelScope.launch {
+            _uiState.value = UiState.Loading
+            
+            repository.createRequest(deviceType, deviceModel, description, location)
+                .onSuccess {
+                    // После успешного создания перезагружаем список
+                    loadRequests()
+                }
+                .onFailure { exception ->
+                    _uiState.value = UiState.Error(
+                        exception.message ?: "Ошибка создания заявки"
+                    )
+                }
+        }
+    }
+    
+    fun completeRequest(requestId: Int) {
+        viewModelScope.launch {
+            repository.completeRequest(requestId)
+                .onSuccess {
+                    // После успешного завершения перезагружаем список
+                    loadRequests()
+                }
+                .onFailure { exception ->
+                    _uiState.value = UiState.Error(
+                        exception.message ?: "Ошибка обновления статуса"
+                    )
+                }
+        }
+    }
+}
+```
+
+## Шаг 6: Создание навигационного графа
+
+1. В панели проекта кликните правой кнопкой мыши по папке `res` -> **New** -> **Android Resource File**.
+2. Имя файла: `nav_graph`, тип ресурса: **Navigation**. Нажмите OK.
+
+Откройте `res/navigation/nav_graph.xml` и добавьте фрагмент RequestListFragment
+
+
+## Шаг 7: Изменение MainActivity
+
+Откройте `activity_main.xml`, удалите стандартный TextView и добавьте NavHostFragment
+
+
+## Шаг 8: Создание адаптера для RecyclerView
+
+Создайте layout для элемента списка `res/layout/item_request.xml`:
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.cardview.widget.CardView 
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_margin="8dp"
+    app:cardElevation="4dp"
+    app:cardCornerRadius="8dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="12dp">
+
+        <TextView
+            android:id="@+id/tvDeviceType"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textStyle="bold"
+            android:textSize="16sp" />
+
+        <TextView
+            android:id="@+id/tvDeviceModel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp" />
+
+        <TextView
+            android:id="@+id/tvProblem"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp" />
+
+        <TextView
+            android:id="@+id/tvLocation"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp" />
+
+        <TextView
+            android:id="@+id/tvStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:textStyle="italic" />
+
+        <Button
+            android:id="@+id/btnComplete"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Выполнено" />
+
+    </LinearLayout>
+
+</androidx.cardview.widget.CardView>
+```
+
+Создайте файл `RequestAdapter.kt`:
+
+```kotlin
+package com.example.officetech
+
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
+import android.widget.Button
+import android.widget.TextView
+import androidx.recyclerview.widget.RecyclerView
+
+class RequestAdapter(
+    private var requests: List<ServiceRequest>,
+    private val onCompleteClick: (Int) -> Unit
+) : RecyclerView.Adapter<RequestAdapter.RequestViewHolder>() {
+
+    class RequestViewHolder(view: View) : RecyclerView.ViewHolder(view) {
+        val tvDeviceType: TextView = view.findViewById(R.id.tvDeviceType)
+        val tvDeviceModel: TextView = view.findViewById(R.id.tvDeviceModel)
+        val tvProblem: TextView = view.findViewById(R.id.tvProblem)
+        val tvLocation: TextView = view.findViewById(R.id.tvLocation)
+        val tvStatus: TextView = view.findViewById(R.id.tvStatus)
+        val btnComplete: Button = view.findViewById(R.id.btnComplete)
+    }
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RequestViewHolder {
+        val view = LayoutInflater.from(parent.context)
+            .inflate(R.layout.item_request, parent, false)
+        return RequestViewHolder(view)
+    }
+
+    override fun onBindViewHolder(holder: RequestViewHolder, position: Int) {
+        val request = requests[position]
+        
+        holder.tvDeviceType.text = "Тип: ${request.deviceType}"
+        holder.tvDeviceModel.text = "Модель: ${request.deviceModel}"
+        holder.tvProblem.text = "Проблема: ${request.problemDescription}"
+        holder.tvLocation.text = "Место: ${request.location}"
+        holder.tvStatus.text = "Статус: ${getStatusText(request.status)}"
+        
+        // Показываем кнопку только если статус не "completed"
+        if (request.status == "completed") {
+            holder.btnComplete.visibility = View.GONE
+            holder.tvStatus.setTextColor(android.graphics.Color.GREEN)
+        } else {
+            holder.btnComplete.visibility = View.VISIBLE
+            holder.btnComplete.setOnClickListener {
+                onCompleteClick(request.id)
+            }
+            holder.tvStatus.setTextColor(android.graphics.Color.RED)
+        }
+    }
+
+    override fun getItemCount(): Int = requests.size
+
+    fun updateRequests(newRequests: List<ServiceRequest>) {
+        requests = newRequests
+        notifyDataSetChanged()
+    }
+
+    private fun getStatusText(status: String?): String {
+        return when (status) {
+            "new" -> "Новая"
+            "in_progress" -> "В работе"
+            "completed" -> "Выполнена"
+			null -> "Статус не указан"
+            else -> status
+        }
+    }
+}
+```
+
+## Шаг 9: Изменение RequestListFragment
+
+Измените файл `fragment_request_list.xml` в папке `res/layout`:
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout 
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Заявки на ремонт оргтехники"
+        android:textSize="24sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="16dp" />
+
+    <!-- Форма создания новой заявки -->
+    <EditText
+        android:id="@+id/etDeviceType"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Тип устройства (Принтер/Сканер)"
+        android:inputType="text"
+        android:layout_marginBottom="8dp" />
+
+    <EditText
+        android:id="@+id/etDeviceModel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Модель устройства"
+        android:inputType="text"
+        android:layout_marginBottom="8dp" />
+
+    <EditText
+        android:id="@+id/etProblem"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Описание проблемы"
+        android:inputType="textMultiLine"
+        android:minLines="2"
+        android:layout_marginBottom="8dp" />
+
+    <EditText
+        android:id="@+id/etLocation"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Место расположения (кабинет)"
+        android:inputType="text"
+        android:layout_marginBottom="8dp" />
+
+    <Button
+        android:id="@+id/btnCreateRequest"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Создать заявку"
+        android:layout_marginBottom="16dp" />
+
+    <!-- Список заявок -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/rvRequests"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+    <ProgressBar
+        android:id="@+id/progressBar"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/tvError"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textColor="@android:color/holo_red_dark"
+        android:gravity="center"
+        android:visibility="gone" />
+
+</LinearLayout>
+```
+
+Измените файл `RequestListFragment.kt`:
+
+```kotlin
+package com.example.officetech
+
+import android.os.Bundle
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
+import android.widget.Button
+import android.widget.EditText
+import android.widget.ProgressBar
+import android.widget.TextView
+import androidx.fragment.app.Fragment
+import androidx.fragment.app.viewModels
+import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+import kotlinx.coroutines.launch
+
+class RequestListFragment : Fragment() {
+
+    private lateinit var etDeviceType: EditText
+    private lateinit var etDeviceModel: EditText
+    private lateinit var etProblem: EditText
+    private lateinit var etLocation: EditText
+    private lateinit var btnCreateRequest: Button
+    private lateinit var rvRequests: RecyclerView
+    private lateinit var progressBar: ProgressBar
+    private lateinit var tvError: TextView
+
+    private val viewModel: RequestViewModel by viewModels()
+    private lateinit var adapter: RequestAdapter
+
+    override fun onCreateView(
+        inflater: LayoutInflater, container: ViewGroup?,
+        savedInstanceState: Bundle?
+    ): View? {
+        val view = inflater.inflate(R.layout.fragment_request_list, container, false)
+        
+        initializeViews(view)
+        setupRecyclerView()
+        setupObservers()
+        setupListeners()
+        
+        // Загружаем заявки при старте
+        viewModel.loadRequests()
+        
+        return view
+    }
+
+    private fun initializeViews(view: View) {
+        etDeviceType = view.findViewById(R.id.etDeviceType)
+        etDeviceModel = view.findViewById(R.id.etDeviceModel)
+        etProblem = view.findViewById(R.id.etProblem)
+        etLocation = view.findViewById(R.id.etLocation)
+        btnCreateRequest = view.findViewById(R.id.btnCreateRequest)
+        rvRequests = view.findViewById(R.id.rvRequests)
+        progressBar = view.findViewById(R.id.progressBar)
+        tvError = view.findViewById(R.id.tvError)
+    }
+
+    private fun setupRecyclerView() {
+        adapter = RequestAdapter(emptyList()) { requestId ->
+            viewModel.completeRequest(requestId)
+        }
+        rvRequests.layoutManager = LinearLayoutManager(requireContext())
+        rvRequests.adapter = adapter
+    }
+
+    private fun setupObservers() {
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewModel.uiState.collect { state ->
+                when (state) {
+                    is UiState.Idle -> {
+                        progressBar.visibility = View.GONE
+                        btnCreateRequest.isEnabled = true
+                    }
+                    is UiState.Loading -> {
+                        progressBar.visibility = View.VISIBLE
+                        tvError.visibility = View.GONE
+                        btnCreateRequest.isEnabled = false
+                    }
+                    is UiState.Success -> {
+                        progressBar.visibility = View.GONE
+                        btnCreateRequest.isEnabled = true
+                        tvError.visibility = View.GONE
+                        adapter.updateRequests(state.requests)
+                    }
+                    is UiState.Error -> {
+                        progressBar.visibility = View.GONE
+                        btnCreateRequest.isEnabled = true
+                        tvError.visibility = View.VISIBLE
+                        tvError.text = "Ошибка: ${state.message}"
+                    }
+                }
+            }
+        }
+    }
+
+    private fun setupListeners() {
+        btnCreateRequest.setOnClickListener {
+            val deviceType = etDeviceType.text.toString()
+            val deviceModel = etDeviceModel.text.toString()
+            val problem = etProblem.text.toString()
+            val location = etLocation.text.toString()
+            
+            viewModel.createRequest(deviceType, deviceModel, problem, location)
+            
+            // Очищаем поля после создания
+            etDeviceType.text.clear()
+            etDeviceModel.text.clear()
+            etProblem.text.clear()
+            etLocation.text.clear()
+        }
+    }
+}
+```
+
+## Шаг 10: Настройка разрешений и сетевого доступа
+
+Откройте `AndroidManifest.xml` и добавьте разрешение на доступ к интернету перед тегом `<application>`:
+
+```xml
+<uses-permission android:name="android.permission.INTERNET" />
+```
+
+Так как наш сервер работает по протоколу **HTTP** (а не HTTPS), добавьте атрибут в тег `<application>`:
+
+```xml
+<application
+    ...
+    android:usesCleartextTraffic="true">
+```
